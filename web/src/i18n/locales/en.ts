@@ -312,6 +312,9 @@ export const en: Messages = {
     downloadingStatus: "{path} · Downloading",
     status: "{path} · {count} items · Drop files or folders here to upload",
     connecting: "Connecting SFTP...",
+    reconnecting: "SFTP disconnected. Reconnecting ({current}/{max})...",
+    reconnectFailed:
+      "SFTP connection lost. Auto-reconnect failed after {count} attempts",
     dropToUpload: "Drop files or folders to upload to {path}",
     readDirFailed: "Failed to read directory",
     sftpConnectFailed: "SFTP connection failed",

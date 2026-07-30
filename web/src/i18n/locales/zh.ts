@@ -297,6 +297,8 @@ export const zh = {
     downloadingStatus: "{path} · 下载中",
     status: "{path} · {count} 项 · 拖拽文件或文件夹到此处上传",
     connecting: "正在连接 SFTP...",
+    reconnecting: "SFTP 连接断开，正在自动重连 ({current}/{max})...",
+    reconnectFailed: "SFTP 连接已断开，自动重连失败（已重试 {count} 次）",
     dropToUpload: "释放以上传文件或文件夹到 {path}",
     readDirFailed: "读取目录失败",
     sftpConnectFailed: "SFTP 连接失败",

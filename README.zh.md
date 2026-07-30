@@ -9,14 +9,14 @@
 <h1 align="center">ternssh</h1>
 
 <p align="center">
-  SSH workspace on Cloudflare<br />
-  Draggable dashboard · Terminal · SFTP · Status monitoring
+  基于 Cloudflare 的 SSH 工作台<br />
+  可拖拽仪表盘 · 终端 · SFTP · 状态监控
 </p>
 
 <p align="center">
   <a href="LICENSE">GPL-3.0-or-later</a>
   ·
-  <a href="README.zh.md">中文</a>
+  <a href="README.md">English</a>
 </p>
 
 <p align="center">
@@ -29,19 +29,19 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/preview-dark.png" />
     <source media="(prefers-color-scheme: light)" srcset="docs/preview-light.png" />
-    <img src="docs/preview-light.png" alt="ternssh dashboard preview" width="1024" />
+    <img src="docs/preview-light.png" alt="ternssh 仪表盘预览" width="1024" />
   </picture>
 </p>
 
 ---
 
-**ternssh** is an SSH management tool that runs on Cloudflare Edge. Full documentation: **[Docs](https://ternssh.com/docs/home)**.
+**ternssh** 是一款运行在 Cloudflare Edge 上的 SSH 管理工具。完整文档见 **[文档](https://ternssh.com/docs/home)**。
 
-## Deployment
+## 部署
 
-### Docker quick start
+### Docker 一键启动
 
-Using the prebuilt image (recommended):
+使用预构建镜像（推荐）：
 
 ```bash
 docker run -d \
@@ -52,20 +52,20 @@ docker run -d \
   ghcr.io/haradakashiwa/ternssh:latest
 ```
 
-Or with Docker Compose:
+或使用 Docker Compose：
 
 ```bash
 docker compose -f docker-compose.ghcr.yml up -d
 ```
 
-Build from source:
+从源码构建：
 
 ```bash
 docker compose up -d --build
 ```
 
-Open http://localhost:8787 after startup. To enable Cloudflare Access authentication, set the `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` environment variables.
+启动后访问 http://localhost:8787。如需启用 Cloudflare Access 认证，可添加环境变量 `ACCESS_TEAM_DOMAIN` 与 `ACCESS_AUD`。
 
 ### Cloudflare Workers
 
-See the [deployment guide](https://ternssh.com/docs/deployment) for details.
+详见 [部署指南](https://ternssh.com/docs/deployment)。

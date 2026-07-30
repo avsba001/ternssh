@@ -44,10 +44,13 @@ function wsUrl(path: string): string {
 
 export class SftpClient {
   private ws: WebSocket | null = null;
+  private wsUrlPath: string | null = null;
   private waiters: Waiter[] = [];
   private closed = false;
   private intentionalClose = false;
   private sftpReady = false;
+  private reconnectInFlight: Promise<void> | null = null;
+  private unexpectedCloseHandler: (() => void) | null = null;
   private uploadProgressHandler: ((progress: SftpUploadProgress) => void) | null =
     null;
   private downloadProgressHandler:
@@ -64,13 +67,20 @@ export class SftpClient {
   } | null = null;
 
   get connected(): boolean {
-    return this.ws?.readyState === WebSocket.OPEN;
+    return this.ws?.readyState === WebSocket.OPEN && !this.closed;
+  }
+
+  setOnUnexpectedClose(handler: (() => void) | null): void {
+    this.unexpectedCloseHandler = handler;
   }
 
   async connect(path: string): Promise<void> {
+    const handler = this.unexpectedCloseHandler;
     this.disconnect();
+    this.unexpectedCloseHandler = handler;
     this.closed = false;
     this.intentionalClose = false;
+    this.wsUrlPath = path;
 
     await new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(wsUrl(path));
@@ -80,14 +90,19 @@ export class SftpClient {
       ws.onopen = () => resolve();
       ws.onerror = () => reject(new Error("SFTP WebSocket 连接失败"));
       ws.onclose = () => {
+        // Ignore stale close events after reconnect replaced this socket.
+        if (this.ws !== ws) {
+          return;
+        }
         this.closed = true;
         this.sftpReady = false;
-        if (!this.intentionalClose) {
-          this.rejectAll(new Error("SFTP 连接已关闭"));
-        } else {
-          this.clearWaiters();
-        }
         this.ws = null;
+        if (this.intentionalClose) {
+          this.clearWaiters();
+          return;
+        }
+        this.rejectAll(new Error("SFTP 连接已关闭"));
+        this.unexpectedCloseHandler?.();
       };
       ws.onmessage = (event) => {
         void this.handleMessage(event.data);
@@ -101,6 +116,24 @@ export class SftpClient {
     );
 
     await this.initializeSftp();
+  }
+
+  async reconnect(path?: string): Promise<void> {
+    const target = path ?? this.wsUrlPath;
+    if (!target) {
+      throw new Error("SFTP 未连接");
+    }
+    if (this.connected && this.sftpReady) {
+      return;
+    }
+    if (this.reconnectInFlight) {
+      return this.reconnectInFlight;
+    }
+
+    this.reconnectInFlight = this.connect(target).finally(() => {
+      this.reconnectInFlight = null;
+    });
+    return this.reconnectInFlight;
   }
 
   private async initializeSftp(): Promise<void> {
@@ -146,16 +179,33 @@ export class SftpClient {
     );
   }
 
+  private isConnectionLostError(error: unknown): boolean {
+    if (!(error instanceof Error)) return false;
+    return (
+      error.message.includes("SFTP 连接已关闭") ||
+      error.message.includes("SFTP 已断开") ||
+      error.message.includes("SFTP 未连接") ||
+      error.message.includes("SFTP WebSocket 连接失败")
+    );
+  }
+
   private async withSftpRetry<T>(operation: () => Promise<T>): Promise<T> {
     try {
       return await operation();
     } catch (error) {
-      if (!this.isChannelResetError(error)) {
+      if (this.intentionalClose) {
         throw error;
       }
-      this.sftpReady = false;
-      await this.ensureSftpReady();
-      return operation();
+      if (this.isChannelResetError(error)) {
+        this.sftpReady = false;
+        await this.ensureSftpReady();
+        return operation();
+      }
+      if (this.isConnectionLostError(error) && this.wsUrlPath) {
+        await this.reconnect();
+        return operation();
+      }
+      throw error;
     }
   }
 
@@ -481,6 +531,7 @@ export class SftpClient {
     this.intentionalClose = true;
     this.closed = true;
     this.sftpReady = false;
+    this.unexpectedCloseHandler = null;
     this.clearWaiters();
     if (this.ws) {
       try {

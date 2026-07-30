@@ -22,6 +22,19 @@ export async function acquireSftpClient(
   return client;
 }
 
+/** Reconnect an existing pooled client, or acquire a new one if missing. */
+export async function reconnectSftpClient(
+  sessionId: string,
+  sftpWsUrl: string,
+): Promise<SftpClient> {
+  const existing = clients.get(sessionId);
+  if (existing) {
+    await existing.reconnect(sftpWsUrl);
+    return existing;
+  }
+  return acquireSftpClient(sessionId, sftpWsUrl);
+}
+
 /** Dedicated SFTP connection for a single upload; caller must disconnect when done. */
 export async function createEphemeralSftpClient(
   sftpWsUrl: string,

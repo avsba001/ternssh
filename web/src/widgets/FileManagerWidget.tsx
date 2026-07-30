@@ -21,6 +21,8 @@ import {
   getPrimarySessionForServer,
   getSftpSessionForServer,
   isSessionAlive,
+  MAX_SESSION_RECONNECT_ATTEMPTS,
+  SESSION_RECONNECT_DELAY_MS,
   type ServerSession,
 } from "@/lib/sessions";
 import {
@@ -37,6 +39,7 @@ import {
 import {
   acquireSftpClient,
   createEphemeralSftpClient,
+  reconnectSftpClient,
   releaseSftpClient,
 } from "@/lib/sftp-session-pool";
 import { cn } from "@/lib/utils";
@@ -183,6 +186,9 @@ export function FileManagerWidget({
   const folderInputRef = useRef<HTMLInputElement | null>(null);
   const mountedRef = useRef(true);
   const createdDirsRef = useRef<Set<string>>(new Set());
+  const sessionRef = useRef(session);
+  const reconnectingRef = useRef(false);
+  const recoverSftpRef = useRef<(() => void) | null>(null);
   const [remotePath, setRemotePath] = useState(".");
   const [pathInput, setPathInput] = useState(".");
   const [entries, setEntries] = useState<SftpEntry[]>([]);
@@ -203,6 +209,8 @@ export function FileManagerWidget({
   const uploadCancelledRef = useRef(false);
   const uploadStartedAtRef = useRef(0);
   const remotePathRef = useRef(".");
+
+  sessionRef.current = session;
 
   const sortedEntries = useMemo(() => sortSftpEntries(entries), [entries]);
   const selectedEntry = useMemo(
@@ -264,6 +272,94 @@ export function FileManagerWidget({
     remotePathRef.current = remotePath;
   }, [remotePath]);
 
+  const bindClient = useCallback((client: SftpClient) => {
+    client.setOnUnexpectedClose(() => {
+      recoverSftpRef.current?.();
+    });
+    clientRef.current = client;
+  }, []);
+
+  const recoverSftpConnection = useCallback(async () => {
+    const currentSession = sessionRef.current;
+    if (!currentSession || currentSession.status !== "open") return;
+    if (reconnectingRef.current) return;
+
+    reconnectingRef.current = true;
+    const { sessionId, sftpWsUrl } = currentSession;
+    const pathToRestore = remotePathRef.current;
+
+    if (isActive()) {
+      setReady(false);
+      setLoading(true);
+      setMenu(null);
+    }
+
+    try {
+      for (
+        let attempt = 1;
+        attempt <= MAX_SESSION_RECONNECT_ATTEMPTS;
+        attempt++
+      ) {
+        if (!isActive()) return;
+        if (sessionRef.current?.sessionId !== sessionId) return;
+        if (sessionRef.current.status !== "open") return;
+
+        setError(
+          t("fileManager.reconnecting", {
+            current: attempt,
+            max: MAX_SESSION_RECONNECT_ATTEMPTS,
+          }),
+        );
+
+        await new Promise((resolve) =>
+          window.setTimeout(resolve, SESSION_RECONNECT_DELAY_MS),
+        );
+
+        if (!isActive()) return;
+        if (sessionRef.current?.sessionId !== sessionId) return;
+        if (sessionRef.current.status !== "open") return;
+
+        try {
+          if (clientRef.current?.connected) {
+            bindClient(clientRef.current);
+          } else {
+            const client = await reconnectSftpClient(sessionId, sftpWsUrl);
+            if (!isActive()) return;
+            if (sessionRef.current?.sessionId !== sessionId) return;
+            bindClient(client);
+          }
+
+          setReady(true);
+          setError(null);
+          await loadDirectory(pathToRestore);
+          return;
+        } catch {
+          // try next attempt
+        }
+      }
+
+      if (!isActive()) return;
+      if (sessionRef.current?.sessionId !== sessionId) return;
+      releaseSftpClient(sessionId);
+      clearClientRef();
+      setReady(false);
+      setError(
+        t("fileManager.reconnectFailed", {
+          count: MAX_SESSION_RECONNECT_ATTEMPTS,
+        }),
+      );
+    } finally {
+      reconnectingRef.current = false;
+      if (isActive()) setLoading(false);
+    }
+  }, [bindClient, clearClientRef, isActive, loadDirectory, t]);
+
+  useEffect(() => {
+    recoverSftpRef.current = () => {
+      void recoverSftpConnection();
+    };
+  }, [recoverSftpConnection]);
+
   useEffect(() => {
     if (!followTerminalCwd || !followSessionId || !ready || !activeServerId) return;
 
@@ -300,6 +396,7 @@ export function FileManagerWidget({
 
   useEffect(() => {
     if (!session || session.status !== "open") {
+      reconnectingRef.current = false;
       if (session?.status === "closed" || session?.status === "error") {
         releaseSftpClient(session.sessionId);
       }
@@ -331,7 +428,7 @@ export function FileManagerWidget({
         try {
           const client = await acquireSftpClient(sessionId, sftpWsUrl);
           if (cancelled || !isActive()) return;
-          clientRef.current = client;
+          bindClient(client);
           setReady(true);
           const result = await client.list(".");
           if (cancelled || !isActive()) return;
@@ -369,12 +466,14 @@ export function FileManagerWidget({
 
     return () => {
       cancelled = true;
+      clientRef.current?.setOnUnexpectedClose(null);
       clearClientRef();
     };
   }, [
     session?.sessionId,
     session?.status,
     session?.sftpWsUrl,
+    bindClient,
     clearClientRef,
     isActive,
     t,
