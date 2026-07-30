@@ -6,7 +6,7 @@
   </picture>
 </p>
 
-<h1 align="center">ternssh1</h1>
+<h1 align="center">ternssh</h1>
 
 <p align="center">
   SSH workspace on Cloudflare<br />
